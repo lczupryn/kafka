@@ -56,7 +56,7 @@ object PreferredReplicaLeaderElectionCommand extends Logging {
     var zkClient: KafkaZkClient = null
     try {
       val time = Time.SYSTEM
-      zkClient = KafkaZkClient(zkConnect, JaasUtils.isZkSecurityEnabled, 30000, 30000, Int.MaxValue, time)
+      zkClient = KafkaZkClient(zkConnect, JaasUtils.isZkSecurityEnabled, 30000, 30000, Int.MaxValue, time, admin = true)
 
       val partitionsForPreferredReplicaElection =
         if (!options.has(jsonFileOpt))

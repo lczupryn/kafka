@@ -24,8 +24,8 @@ import java.lang.management.ManagementFactory
 import java.util
 import java.util.{Collections, Properties}
 import java.util.concurrent._
-import javax.management.ObjectName
 
+import javax.management.ObjectName
 import com.yammer.metrics.Metrics
 import com.yammer.metrics.core.MetricName
 import kafka.admin.ConfigCommand
@@ -37,6 +37,7 @@ import kafka.network.{Processor, RequestChannel}
 import kafka.utils._
 import kafka.utils.Implicits._
 import kafka.zk.{ConfigEntityChangeNotificationZNode, ZooKeeperTestHarness}
+import kafka.zookeeper.ZooKeeperClient
 import org.apache.kafka.clients.CommonClientConfigs
 import org.apache.kafka.clients.admin.ConfigEntry.{ConfigSource, ConfigSynonym}
 import org.apache.kafka.clients.admin._
@@ -615,7 +616,9 @@ class DynamicBrokerReconfigurationTest extends ZooKeeperTestHarness with SaslSet
     val controllerEpoch = zkClient.getControllerEpoch
     val controllerServer = servers(zkClient.getControllerId.getOrElse(throw new IllegalStateException("No controller")))
     val controllerZkClient = controllerServer.zkClient
-    val sessionExpiringClient = createZooKeeperClientToTriggerSessionExpiry(controllerZkClient.currentZooKeeper)
+    val sessionExpiringClient = createZooKeeperClientToTriggerSessionExpiry(
+      controllerZkClient.currentZooKeeper.asInstanceOf[ZooKeeperClient].currentZooKeeper
+    )
     sessionExpiringClient.close()
     TestUtils.waitUntilTrue(() => zkClient.getControllerEpoch != controllerEpoch,
       "Controller not re-elected after ZK session expiry")

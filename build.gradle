@@ -143,8 +143,8 @@ subprojects {
   if (!JavaVersion.current().isJava9Compatible())
     apply plugin: 'findbugs'
 
-  sourceCompatibility = 1.7
-  targetCompatibility = 1.7
+  sourceCompatibility = 1.8
+  targetCompatibility = 1.8
 
   compileJava {
     options.encoding = 'UTF-8'
@@ -566,6 +566,9 @@ project(':core') {
       exclude module: 'log4j'
       exclude module: 'netty'
     }
+
+    compile 'io.atomix:atomix:3.1.0'
+    compile 'io.atomix:atomix-raft:3.1.0'
 
     compileOnly libs.log4j
 
@@ -1270,7 +1273,9 @@ project(':connect:runtime') {
     compile libs.jettyServlet
     compile libs.jettyServlets
     compile libs.jettyClient
-    compile(libs.reflections)
+    compile(libs.reflections) {
+      exclude module: 'guava'
+    }
     compile(libs.mavenArtifact)
 
     testCompile project(':clients').sourceSets.test.output
@@ -1374,4 +1379,8 @@ task aggregatedJavadoc(type: Javadoc) {
   includes = projectsWithJavadoc.collectMany { it.javadoc.getIncludes() }
   excludes = projectsWithJavadoc.collectMany { it.javadoc.getExcludes() }
   options.links "http://docs.oracle.com/javase/7/docs/api/"
+}
+
+subprojects {
+    task allDepts(type: DependencyReportTask) {}
 }

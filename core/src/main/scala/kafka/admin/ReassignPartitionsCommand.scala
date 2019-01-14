@@ -49,7 +49,7 @@ object ReassignPartitionsCommand extends Logging {
     val opts = validateAndParseArgs(args)
     val zkConnect = opts.options.valueOf(opts.zkConnectOpt)
     val time = Time.SYSTEM
-    val zkClient = KafkaZkClient(zkConnect, JaasUtils.isZkSecurityEnabled, 30000, 30000, Int.MaxValue, time)
+    val zkClient = KafkaZkClient(zkConnect, JaasUtils.isZkSecurityEnabled, 30000, 30000, Int.MaxValue, time, admin = true)
 
     val adminClientOpt = createAdminClient(opts)
 

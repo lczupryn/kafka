@@ -178,7 +178,8 @@ public class KafkaEmbedded {
 
     private KafkaZkClient createZkClient() {
         return KafkaZkClient.apply(zookeeperConnect(), false, DEFAULT_ZK_SESSION_TIMEOUT_MS,
-                DEFAULT_ZK_CONNECTION_TIMEOUT_MS, Integer.MAX_VALUE, Time.SYSTEM, "testMetricGroup", "testMetricType");
+                DEFAULT_ZK_CONNECTION_TIMEOUT_MS, Integer.MAX_VALUE, Time.SYSTEM, "testMetricGroup", "testMetricType",
+                false);
     }
 
     public void deleteTopic(final String topic) {

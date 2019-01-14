@@ -93,7 +93,7 @@ object ConfigCommand extends Config {
 
   private def processCommandWithZk(zkConnectString: String, opts: ConfigCommandOptions): Unit = {
     val zkClient = KafkaZkClient(zkConnectString, JaasUtils.isZkSecurityEnabled, 30000, 30000,
-      Int.MaxValue, Time.SYSTEM)
+      Int.MaxValue, Time.SYSTEM, admin = true)
     val adminZkClient = new AdminZkClient(zkClient)
     try {
       if (opts.options.has(opts.alterOpt))

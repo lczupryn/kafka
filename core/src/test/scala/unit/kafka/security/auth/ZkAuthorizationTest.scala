@@ -25,9 +25,11 @@ import org.apache.kafka.common.security.JaasUtils
 import org.apache.zookeeper.data.{ACL, Stat}
 import org.junit.Assert._
 import org.junit.{After, Before, Test}
+
 import scala.collection.JavaConverters._
-import scala.util.{Try, Success, Failure}
+import scala.util.{Failure, Success, Try}
 import javax.security.auth.login.Configuration
+import kafka.zookeeper.ZooKeeperClient
 
 class ZkAuthorizationTest extends ZooKeeperTestHarness with Logging {
   val jaasFile = kafka.utils.JaasTestUtils.writeJaasContextsToFile(kafka.utils.JaasTestUtils.zkSections)
@@ -304,7 +306,7 @@ class ZkAuthorizationTest extends ZooKeeperTestHarness with Logging {
   def testConsumerOffsetPathAcls(): Unit = {
     zkClient.makeSurePersistentPathExists(ConsumerPathZNode.path)
 
-    val consumerPathAcls = zkClient.currentZooKeeper.getACL(ConsumerPathZNode.path, new Stat())
+    val consumerPathAcls = zkClient.currentZooKeeper.asInstanceOf[ZooKeeperClient].currentZooKeeper.getACL(ConsumerPathZNode.path, new Stat())
     assertTrue("old consumer znode path acls are not open", consumerPathAcls.asScala.forall(TestUtils.isAclUnsecure))
   }
 }

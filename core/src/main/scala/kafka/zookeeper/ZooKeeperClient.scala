@@ -25,6 +25,7 @@ import com.yammer.metrics.core.{Gauge, MetricName}
 import kafka.metrics.KafkaMetricsGroup
 import kafka.utils.CoreUtils.{inLock, inReadLock, inWriteLock}
 import kafka.utils.{KafkaScheduler, Logging}
+import kafka.zk.KafkaMetastore
 import org.apache.kafka.common.utils.Time
 import org.apache.zookeeper.AsyncCallback.{ACLCallback, Children2Callback, DataCallback, StatCallback, StringCallback, VoidCallback}
 import org.apache.zookeeper.KeeperException.Code
@@ -50,7 +51,7 @@ class ZooKeeperClient(connectString: String,
                       maxInFlightRequests: Int,
                       time: Time,
                       metricGroup: String,
-                      metricType: String) extends Logging with KafkaMetricsGroup {
+                      metricType: String) extends KafkaMetastore with Logging with KafkaMetricsGroup {
   this.logIdent = "[ZooKeeperClient] "
   private val initializationLock = new ReentrantReadWriteLock()
   private val isConnectedOrExpiredLock = new ReentrantLock()
@@ -316,7 +317,7 @@ class ZooKeeperClient(connectString: String,
     info("Closed.")
   }
 
-  def sessionId: Long = inReadLock(initializationLock) {
+  override def sessionId: Long = inReadLock(initializationLock) {
     zooKeeper.getSessionId
   }
 

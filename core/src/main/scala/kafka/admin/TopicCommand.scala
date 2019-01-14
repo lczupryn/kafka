@@ -55,7 +55,7 @@ object TopicCommand extends Logging {
 
     val time = Time.SYSTEM
     val zkClient = KafkaZkClient(opts.options.valueOf(opts.zkConnectOpt), JaasUtils.isZkSecurityEnabled, 30000, 30000,
-      Int.MaxValue, time)
+      Int.MaxValue, time, admin = true)
 
     var exitCode = 0
     try {
