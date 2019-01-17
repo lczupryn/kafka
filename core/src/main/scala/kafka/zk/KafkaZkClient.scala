@@ -1555,7 +1555,9 @@ object KafkaZkClient {
             admin: Boolean = false) = {
     var metastore: KafkaMetastore = null
     if ( connectString.startsWith( "atomix://" ) ) {
-      metastore = new AtomixClient(time, connectString.substring( "atomix://".length ), sessionTimeoutMs, admin)
+      metastore = new AtomixClient(
+        time, connectString.substring( "atomix://".length ), sessionTimeoutMs, connectionTimeoutMs, admin
+      )
     }
     else {
       metastore = new ZooKeeperClient(connectString, sessionTimeoutMs, connectionTimeoutMs, maxInFlightRequests,

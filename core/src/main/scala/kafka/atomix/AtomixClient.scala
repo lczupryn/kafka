@@ -47,9 +47,10 @@ import scala.util.{Random, Try}
  *
  * @param config path to Atomix configuration file
  * @param sessionTimeoutMs session timeout in milliseconds
+ * @param connectionTimeoutMs connection timeout in milliseconds
  * @param admin flag indicating connection from administrative CLI
  */
-class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, admin: Boolean)
+class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, connectionTimeoutMs: Int, admin: Boolean)
     extends AutoCloseable with KafkaMetastore with Logging with KafkaMetricsGroup {
 
   @volatile private var atomix: Atomix = _ // Atomix client.
@@ -135,7 +136,12 @@ class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, admin: Boo
     running = true
     atomix = if ( config.isEmpty ) Atomix.builder().build() else Atomix.builder( config ).build()
     logger.debug( "Joining Atomix cluster" )
-    atomix.start().join() // Blocks until quorum reached.
+    try {
+      atomix.start().get( connectionTimeoutMs, TimeUnit.MILLISECONDS ) // Blocks until quorum reached.
+    }
+    catch {
+      case e: TimeoutException => throw new ZooKeeperClientTimeoutException( s"Timed out waiting for Atomix quorum" )
+    }
     connected = true
 
     val protocol = MultiRaftProtocol.builder()
@@ -176,11 +182,11 @@ class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, admin: Boo
         if ( ! connected ) {
           // Connectivity re-established.
           afterConnectionRecovered()
+          stateChangeHandlers.values.foreach( callAfterInitializingSession )
+          connected = true
           inLock( isConnectedOrExpiredLock ) {
             isConnectedOrExpiredCondition.signalAll()
           }
-          stateChangeHandlers.values.foreach( callAfterInitializingSession )
-          connected = true
         }
       }
     }, period = sessionTimeoutMs )
@@ -334,9 +340,15 @@ class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, admin: Boo
   override def waitUntilConnected(): Unit = inLock(isConnectedOrExpiredLock) {
     logger.info( "Waiting for Atomix quorum" )
 
-    stateChangeHandlers.values.foreach( callBeforeInitializingSession )
-    isConnectedOrExpiredCondition.await()
-    stateChangeHandlers.values.foreach( callAfterInitializingSession )
+    var nanos = TimeUnit.MILLISECONDS.toNanos( connectionTimeoutMs )
+    while ( ! connected ) {
+      if ( nanos <= 0 ) {
+        throw new ZooKeeperClientTimeoutException( s"Timed out waiting for Atomix quorum" )
+      }
+      nanos = isConnectedOrExpiredCondition.awaitNanos( nanos )
+    }
+
+    logger.info( "Atomix quorum reachable" )
   }
 
   private def afterConnectionRecovered(): Unit = {
