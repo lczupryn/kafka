@@ -1,3 +1,38 @@
+Apache Kafka with Internal Coordination
+=================
+
+Fork of Apache Kafka repository that contains work towards running Kafka without dependency on external coordination service (e.g. ZooKeeper, etcd, Consul). Strong consistency of cluster configuration and broker discovery are guaranteed by [Atomix](https://atomix.io) implementation of [Raft](https://raft.github.io/) algorithm.
+
+Users are encouraged to experiment with hereby distribution and run three brokers in Docker environment:
+
+    ./gradlew clean releaseTarGz
+    docker build -t kafka-atomix:latest -f Dockerfile .
+    cd config/kafka-atomix
+    docker-compose up
+
+### Cluster architecture
+
+High level Kafka architecture without ZooKeeper dependency.
+
+![Kafka cluster architecture with Atomix](docs/images/kafka-atomix-architecture.png)
+
+### Broker configuration
+
+Below table present changes to standard Kafka configuration parameters. Implementation is backward compatible, so if you would like to use ZooKeeper, just specify list of ZK nodes in connection URL.
+
+| Parameter name                    | Description                                                                       | Example                                  |
+|-----------------------------------|-----------------------------------------------------------------------------------|------------------------------------------|
+| `zookeeper.connect`               | Absolute path to Atomix configuration file. Should start with _atomix://_ prefix. | `atomix:///opt/kafka/config/atomix.conf` |
+| `zookeeper.connection.timeout.ms` | Atomix timeout to connect to quorum of nodes.                                     | `60000`                                  |
+| `zookeeper.session.timeout.ms`    | Atomix session timeout.                                                           | `6000`                                   |
+
+### Running administrative commands
+
+Scripts present in _bin_ folder accept absolute path to Atomix client configuration file (example _config/kafka-atomix/broker1/atomix-admin.conf_) instead of ZooKeeper ensemble URL.
+
+    ./bin/kafka-topics.sh --create --zookeeper atomix://./config/kafka-atomix/broker1/atomix-admin.conf --replication-factor 2 --partitions 2 --topic topic1
+
+
 Apache Kafka
 =================
 See our [web site](http://kafka.apache.org) for details on the project.
