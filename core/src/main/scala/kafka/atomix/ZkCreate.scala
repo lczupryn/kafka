@@ -17,6 +17,8 @@
 
 package kafka.atomix
 
+import java.time.Duration
+
 import kafka.zookeeper._
 import org.apache.zookeeper.KeeperException.Code
 import org.apache.zookeeper.{CreateMode, KeeperException}
@@ -37,8 +39,10 @@ class ZkCreate(client: AtomixClient, request: CreateRequest,
     var suffix = ""
     request.createMode match {
       case CreateMode.EPHEMERAL =>
-        client.ephemeralCache.put( client.brokerId(), request.path )
-        created = client.clusterState.putIfAbsent( request.path, nodeNode ) == null
+        created = client.clusterState.putIfAbsent( request.path, nodeNode, Duration.ofMillis( client.entryTtl() ) ) == null
+        if ( created ) {
+          client.ephemeralCache.put( request.path, node )
+        }
       case CreateMode.PERSISTENT_SEQUENTIAL =>
         // ZooKeeper represents sequence numbers as 4 bytes signed integer.
         // Counter overflows when incremented above 2147483647.

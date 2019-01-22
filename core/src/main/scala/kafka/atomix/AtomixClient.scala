@@ -25,7 +25,6 @@ import io.atomix.cluster.{ClusterMembershipEvent, ClusterMembershipEventListener
 import io.atomix.core.Atomix
 import io.atomix.core.counter.AtomicCounter
 import io.atomix.core.map.{AtomicCounterMap, AtomicMap, AtomicMapEvent, AtomicMapEventListener}
-import io.atomix.core.multimap.AtomicMultimap
 import io.atomix.primitive.PrimitiveException
 import io.atomix.protocols.raft.{MultiRaftProtocol, ReadConsistency}
 import kafka.metrics.KafkaMetricsGroup
@@ -62,12 +61,13 @@ class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, connection
 
   private val random = new Random()
   private val expiryScheduler = new KafkaScheduler( threads = 1, "atomix-quorum-monitor" )
+  // Cache containing all ephemeral nodes: key - path, value - latest value.
+  private[atomix] val ephemeralCache: ConcurrentMap[String, AtomixNode] = new ConcurrentHashMap[String, AtomixNode]
 
   // Distributed primitives.
   private[atomix] var idGenerator: AtomicCounter = _ // Counter to generate unique client session identifiers.
   private[atomix] var sequenceNodes: AtomicCounterMap[String] = _ // Map of sequence node path and current counter.
   private[atomix] var clusterState: AtomicMap[String, String] = _ // Main hash map which stores configuration of the cluster.
-  private[atomix] var ephemeralCache: AtomicMultimap[String, String] = _ // Cache mapping broker ID to all of its ephemeral nodes.
 
   // State change handlers.
   private val zNodeChangeHandlers = new ConcurrentHashMap[String, ZNodeChangeHandler]().asScala
@@ -78,18 +78,11 @@ class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, connection
     override def event(event: ClusterMembershipEvent): Unit = {
       logger.debug( s"Received cluster event: $event" )
 
-      if ( ! quorumAvailable() ) {
-        logger.error( "Quorum of nodes not available" )
-        return
-      }
-
       event.`type`() match {
         case ClusterMembershipEvent.Type.MEMBER_REMOVED =>
           if ( Try( event.subject().id().id().toInt ).isSuccess
               && brokerId() != event.subject().id().id() ) {
             logger.debug( s"Node ${event.subject().id().id()} left the cluster." )
-            // Remove ephemeral data from node that left the cluster.
-            retryOnTransientError() { cleanUpEphemeralData( event.subject().id().id() ) }
           }
         case _ =>
       }
@@ -106,7 +99,17 @@ class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, connection
     }
 
     override def event(event: AtomicMapEvent[String, String]): Unit = {
+      if ( AtomicMapEvent.Type.UPDATE == event.`type`() ) {
+        val newNode = NodeUtils.decode( event.key(), event.newValue().value() )
+        val oldNode = NodeUtils.decode( event.key(), event.oldValue().value() )
+        if ( newNode.isEphemeral && newNode.getVersion == oldNode.getVersion ) {
+          // Do not notify about TTL refresh.
+          return
+        }
+      }
+
       logger.debug( s"Received configuration event: $event" )
+
       for ( p <- zNodeChildChangeHandlers.keys ) {
         // Analogical to watcher on ZooKeeper GetChildren operation.
         if ( isDirectChild( p, event.key() )
@@ -153,13 +156,9 @@ class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, connection
     idGenerator = atomix.atomicCounterBuilder( "member_id" ).withProtocol( protocol ).build()
     sequenceNodes = atomix.atomicCounterMapBuilder( "sequence_nodes" ).withProtocol( protocol ).build()
     clusterState = atomix.atomicMapBuilder[String, String]( "system" ).withProtocol( protocol ).build()
-    ephemeralCache = atomix.atomicMultimapBuilder[String, String]( "ephemeral_cache" ).withProtocol( protocol ).build()
 
     expiryScheduler.startup()
 
-    // At this point broker has successfully joined the cluster, which means that majority
-    // of nodes are reachable. In case all brokers were killed abnormally before restart, we need to
-    // remove all ephemeral nodes, e.g. /brokers/ids/* and /controller.
     afterConnectionEstablished()
 
     if ( ! admin ) {
@@ -187,6 +186,18 @@ class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, connection
         }
       }
     }, period = sessionTimeoutMs )
+
+    expiryScheduler.schedule( "atomix-ttl-renew", () => {
+      if ( quorumAvailable() ) {
+        for ( key <- ephemeralCache.keySet().asScala ) {
+          clusterState.put( key, NodeUtils.encode( ephemeralCache.get( key ) ), Duration.ofMillis( entryTtl() ) )
+        }
+      }
+      else {
+        // Network partitioning occurred, so we assume all ephemeral data has expired.
+        ephemeralCache.clear()
+      }
+    }, period = sessionTimeoutMs / 2 )
   }
 
   def sessionId: Long = currentSessionId
@@ -290,8 +301,9 @@ class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, connection
     zNodeChildChangeHandlers.clear()
     stateChangeHandlers.clear()
 
+    ephemeralCache.clear()
+
     clusterState.close()
-    ephemeralCache.close()
     idGenerator.close()
     sequenceNodes.close()
 
@@ -358,35 +370,6 @@ class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, connection
     // connectivity for some time.
     currentSessionId = idGenerator.incrementAndGet()
     logger.debug( s"New Atomix session ID: $sessionId" )
-    if ( ! admin ) {
-      cleanUpEphemeralData()
-    }
-  }
-
-  private def cleanUpEphemeralData(brokerId: String): Unit = {
-    val nodeEphemeralData = ephemeralCache.get( brokerId ).value()
-    for ( entry <- nodeEphemeralData.asScala ) {
-      clusterState.remove( entry )
-    }
-    ephemeralCache.removeAll( brokerId, nodeEphemeralData )
-  }
-
-  private def cleanUpEphemeralData(): Unit = {
-    val reachableBrokers = atomix.getMembershipService.getReachableMembers.asScala
-      .filter( m => Try( m.id().id().toInt ).isSuccess )
-      .map( m => m.id().id() )
-    // Remove data from unreachable brokers.
-    val persistedBrokers = ephemeralCache.keySet().asScala
-    persistedBrokers.foreach(
-      b => if ( ! reachableBrokers.contains( b ) ) cleanUpEphemeralData( b )
-    )
-    // Remove my own data if stale.
-    for ( path <- ephemeralCache.get( brokerId() ).value().asScala ) {
-      val node = clusterState.get( path )
-      if ( node != null && NodeUtils.decode( path, node.value() ).getOwner < currentSessionId ) {
-        clusterState.remove( path, node.version() )
-      }
-    }
   }
 
   private def quorumAvailable(): Boolean = {
@@ -398,6 +381,8 @@ class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, connection
   }
 
   private[atomix] def brokerId(): String = atomix.getMembershipService.getLocalMember.id().id()
+
+  private[atomix] def entryTtl(): Int = sessionTimeoutMs
 }
 
 /**

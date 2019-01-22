@@ -17,6 +17,8 @@
 
 package kafka.atomix
 
+import java.time.Duration
+
 import kafka.zk.ZkVersion
 import kafka.zookeeper._
 import org.apache.zookeeper.KeeperException.Code
@@ -39,10 +41,11 @@ class ZkSetData(client: AtomixClient, request: SetDataRequest,
       val next = NodeUtils.encode( nextNode )
       if ( request.version == ZkVersion.MatchAnyVersion ) {
         // We just blindly update the latest version.
-        client.clusterState.put( request.path, next )
-        val refreshed = client.clusterState.get( request.path )
+        val refreshed = client.clusterState.putAndGet(
+          request.path, next, if ( nextNode.isEphemeral ) Duration.ofMillis( client.entryTtl() ) else Duration.ZERO
+        )
         if ( nextNode.isEphemeral ) {
-          client.ephemeralCache.put( client.brokerId(), request.path )
+          client.ephemeralCache.put( request.path, NodeUtils.decode( request.path, refreshed.value() ) )
         }
         callback(
           SetDataResponse( Code.OK, request.path, request.ctx, new AtomixStat( nextNode, refreshed.version() ), responseMetadata() )
@@ -53,12 +56,13 @@ class ZkSetData(client: AtomixClient, request: SetDataRequest,
         return Some( Code.BADVERSION )
       }
       else {
+        // TODO: Replace function does not support TTL, but luckily Kafka never updates ephemeral data.
         val updated = client.clusterState.replace( request.path, previous.version(), next )
         val refreshed = client.clusterState.get( request.path )
         if ( updated && NodeUtils.decode( request.path, refreshed.value() ).getVersion == nextVersion ) {
           // We have updated the node and own the latest modification.
           if ( nextNode.isEphemeral ) {
-            client.ephemeralCache.put( client.brokerId(), request.path )
+            client.ephemeralCache.put( request.path, NodeUtils.decode( request.path, refreshed.value() ) )
           }
           callback(
             SetDataResponse( Code.OK, request.path, request.ctx, new AtomixStat( nextNode, refreshed.version() ), responseMetadata() )
