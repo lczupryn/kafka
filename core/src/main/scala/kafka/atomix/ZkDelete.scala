@@ -30,7 +30,6 @@ class ZkDelete(client: AtomixClient, request: DeleteRequest,
       return Some( Code.NONODE )
     }
     else {
-      val valueNode = NodeUtils.decode( request.path, value.value() )
       if ( ZkVersion.MatchAnyVersion == request.version ) {
         client.clusterState.remove( request.path )
         callback(

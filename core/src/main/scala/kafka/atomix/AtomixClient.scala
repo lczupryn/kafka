@@ -89,7 +89,7 @@ class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, connection
               && brokerId() != event.subject().id().id() ) {
             logger.debug( s"Node ${event.subject().id().id()} left the cluster." )
             // Remove ephemeral data from node that left the cluster.
-            cleanUpEphemeralData( event.subject().id().id() )
+            retryOnTransientError() { cleanUpEphemeralData( event.subject().id().id() ) }
           }
         case _ =>
       }
@@ -151,21 +151,18 @@ class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, connection
       .build()
 
     idGenerator = atomix.atomicCounterBuilder( "member_id" ).withProtocol( protocol ).build()
-    retryOnTimeout() { currentSessionId = idGenerator.incrementAndGet() }
-    logger.debug( s"Initial Atomix session ID: $sessionId" )
-
     sequenceNodes = atomix.atomicCounterMapBuilder( "sequence_nodes" ).withProtocol( protocol ).build()
     clusterState = atomix.atomicMapBuilder[String, String]( "system" ).withProtocol( protocol ).build()
     ephemeralCache = atomix.atomicMultimapBuilder[String, String]( "ephemeral_cache" ).withProtocol( protocol ).build()
 
     expiryScheduler.startup()
 
-    if ( ! admin ) {
-      // At this point broker has successfully joined the cluster, which means that majority
-      // of nodes are reachable. In case all brokers were killed abnormally before restart, we need to
-      // remove all ephemeral nodes, e.g. /brokers/ids/* and /controller.
-      cleanUpEphemeralData()
+    // At this point broker has successfully joined the cluster, which means that majority
+    // of nodes are reachable. In case all brokers were killed abnormally before restart, we need to
+    // remove all ephemeral nodes, e.g. /brokers/ids/* and /controller.
+    afterConnectionEstablished()
 
+    if ( ! admin ) {
       atomix.getMembershipService.addListener( clusterListener )
       clusterState.addListener( configurationListener )
     }
@@ -181,7 +178,7 @@ class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, connection
       else {
         if ( ! connected ) {
           // Connectivity re-established.
-          afterConnectionRecovered()
+          afterConnectionEstablished()
           stateChangeHandlers.values.foreach( callAfterInitializingSession )
           connected = true
           inLock( isConnectedOrExpiredLock ) {
@@ -302,7 +299,7 @@ class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, connection
     connected = false
   }
 
-  def retryOnTimeout[A]()(code: => A): A = {
+  def retryOnTransientError[A]()(code: => A): A = {
     var result: Option[A] = None
     var attempt: Int = 0
     while ( result.isEmpty ) {
@@ -311,10 +308,15 @@ class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, connection
         result = Some( code )
       }
       catch {
-        case e: PrimitiveException.Timeout =>
-          logger.warn( s"Retrying timed-out call for $attempt time: ${e.getMessage}" )
-          // Randomize retry delay to minimize possibility of two nodes competing for same resource concurrently.
-          Thread.sleep( random.nextInt( 1000 ) + 1 )
+        case e @ ( _: PrimitiveException.UnknownSession | _: PrimitiveException.Timeout ) =>
+          if ( quorumAvailable() ) {
+            logger.warn( s"Retrying transient failure for $attempt time: ${e.getMessage}" )
+            // Randomize retry delay to minimize possibility of two nodes competing for same resource concurrently.
+            Thread.sleep( random.nextInt( 1000 ) + 1 )
+          }
+          else {
+            throw e
+          }
       }
     }
     result.get
@@ -351,13 +353,11 @@ class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, connection
     logger.info( "Atomix quorum reachable" )
   }
 
-  private def afterConnectionRecovered(): Unit = {
-    retryOnTimeout() {
-      // Create unique session identifier and epoch so that we know we have lost network
-      // connectivity for some time.
-      currentSessionId = idGenerator.incrementAndGet()
-      logger.debug( s"New Atomix session ID: $sessionId" )
-    }
+  private def afterConnectionEstablished(): Unit = retryOnTransientError() {
+    // Create unique session identifier and epoch so that we know we have lost network
+    // connectivity for some time.
+    currentSessionId = idGenerator.incrementAndGet()
+    logger.debug( s"New Atomix session ID: $sessionId" )
     if ( ! admin ) {
       cleanUpEphemeralData()
     }
