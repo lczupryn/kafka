@@ -14,7 +14,9 @@ Users are encouraged to experiment with hereby distribution and run three broker
 
 High level Kafka architecture without ZooKeeper dependency.
 
-![Kafka cluster architecture with Atomix](docs/images/kafka-atomix-architecture.png)
+<p align="center">
+    <img src="https://github.com/lukasz-antoniak/kafka/raw/1.1/docs/images/kafka-atomix-architecture.png" alt="Kafka cluster architecture with Atomix" height="70%" width="70%" />
+</p>
 
 ### Broker configuration
 

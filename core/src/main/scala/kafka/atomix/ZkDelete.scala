@@ -30,12 +30,8 @@ class ZkDelete(client: AtomixClient, request: DeleteRequest,
       return Some( Code.NONODE )
     }
     else {
-      val valueNode = NodeUtils.decode( request.path, value.value() )
       if ( ZkVersion.MatchAnyVersion == request.version ) {
         client.clusterState.remove( request.path )
-        if ( valueNode.isEphemeral ) {
-          client.ephemeralCache.remove( request.path )
-        }
         callback(
           DeleteResponse( Code.OK, request.path, request.ctx, responseMetadata() )
         )
@@ -44,9 +40,6 @@ class ZkDelete(client: AtomixClient, request: DeleteRequest,
         val removed = client.clusterState.remove( request.path, value.version() )
         if ( ! removed ) {
           return Some( Code.BADVERSION )
-        }
-        if ( valueNode.isEphemeral ) {
-          client.ephemeralCache.remove( request.path )
         }
         callback(
           DeleteResponse( Code.OK, request.path, request.ctx, responseMetadata() )

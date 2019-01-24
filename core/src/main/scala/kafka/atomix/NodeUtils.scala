@@ -23,19 +23,15 @@ import kafka.common.KafkaException
 import kafka.utils.Json
 
 import scala.collection.JavaConverters._
-import scala.collection.mutable
 
 private[atomix] object NodeUtils {
   def encode(node: AtomixNode): String = {
     val payload = if (node.getData == null) "[null]" else new String( node.getData, StandardCharsets.UTF_8 )
-    val jsonMap = mutable.Map(
+    val jsonMap = Map(
       "data" -> payload,
       "version" -> node.getVersion, // Version corresponds to data version from ZooKeeper (node level).
       "owner" -> node.getOwner
     )
-    if ( node.isEphemeral ) {
-      jsonMap.put( "updatedOn", System.currentTimeMillis() )
-    }
     Json.encodeAsString( jsonMap.asJava )
   }
 
