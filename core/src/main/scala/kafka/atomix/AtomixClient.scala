@@ -24,6 +24,7 @@ import java.util.concurrent.locks.ReentrantLock
 import io.atomix.cluster.{ClusterMembershipEvent, ClusterMembershipEventListener}
 import io.atomix.core.Atomix
 import io.atomix.core.counter.AtomicCounter
+import io.atomix.core.lock.AtomicLock
 import io.atomix.core.map.{AtomicCounterMap, AtomicMap, AtomicMapEvent, AtomicMapEventListener}
 import io.atomix.core.multimap.AtomicMultimap
 import io.atomix.primitive.PrimitiveException
@@ -68,6 +69,7 @@ class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, connection
   private[atomix] var sequenceNodes: AtomicCounterMap[String] = _ // Map of sequence node path and current counter.
   private[atomix] var clusterState: AtomicMap[String, String] = _ // Main hash map which stores configuration of the cluster.
   private[atomix] var ephemeralCache: AtomicMultimap[String, String] = _ // Cache mapping broker ID to all of its ephemeral nodes.
+  private[atomix] var ephemeralLock: AtomicLock = _ // Lock to ensure that any changes to ephemeral data is processed in sequence.
 
   // State change handlers.
   private val zNodeChangeHandlers = new ConcurrentHashMap[String, ZNodeChangeHandler]().asScala
@@ -89,7 +91,20 @@ class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, connection
               && brokerId() != event.subject().id().id() ) {
             logger.debug( s"Node ${event.subject().id().id()} left the cluster." )
             // Remove ephemeral data from node that left the cluster.
-            retryOnTransientError() { cleanUpEphemeralData( event.subject().id().id() ) }
+            retryOnTransientError() {
+              val lock = ephemeralLock.tryLock( Duration.ofMillis( sessionTimeoutMs * 2 ) )
+              try {
+                if ( lock.isPresent ) {
+                  // We have to try to remove ephemeral nodes from all unreachable nodes.
+                  // If we decided to delete only records associated with one broker and died while processing,
+                  // such scenario could cause inconsistency.
+                  cleanUpEphemeralData()
+                }
+              }
+              finally {
+                ephemeralLock.unlock()
+              }
+            }
           }
         case _ =>
       }
@@ -140,7 +155,7 @@ class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, connection
       atomix.start().get( connectionTimeoutMs, TimeUnit.MILLISECONDS ) // Blocks until quorum reached.
     }
     catch {
-      case e: TimeoutException => throw new ZooKeeperClientTimeoutException( s"Timed out waiting for Atomix quorum" )
+      case _: TimeoutException => throw new ZooKeeperClientTimeoutException( s"Timed out waiting for Atomix quorum" )
     }
     connected = true
 
@@ -153,6 +168,7 @@ class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, connection
     idGenerator = atomix.atomicCounterBuilder( "member_id" ).withProtocol( protocol ).build()
     sequenceNodes = atomix.atomicCounterMapBuilder( "sequence_nodes" ).withProtocol( protocol ).build()
     clusterState = atomix.atomicMapBuilder[String, String]( "system" ).withProtocol( protocol ).build()
+    ephemeralLock = atomix.atomicLockBuilder( "ephemeral_lock" ).withProtocol( protocol ).build()
     ephemeralCache = atomix.atomicMultimapBuilder[String, String]( "ephemeral_cache" ).withProtocol( protocol ).build()
 
     expiryScheduler.startup()
@@ -230,7 +246,7 @@ class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, connection
         case _: PrimitiveException.Timeout =>
           // Atomix reports operation timeout even if quorum of nodes cannot be reached. Simulate ZooKeeper
           // connectivity issue until quorum can be reached again.
-          command.reportUnsuccessful( if ( quorumAvailable( false ) ) Code.OPERATIONTIMEOUT else Code.CONNECTIONLOSS )
+          command.reportUnsuccessful( if ( quorumAvailable( true ) ) Code.OPERATIONTIMEOUT else Code.CONNECTIONLOSS )
       }
     }
   }
@@ -284,6 +300,8 @@ class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, connection
   override def close(): Unit = {
     running = false
 
+    Try { cleanUpEphemeralData( brokerId() ) }
+
     expiryScheduler.shutdown()
 
     zNodeChangeHandlers.clear()
@@ -292,6 +310,7 @@ class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, connection
 
     clusterState.close()
     ephemeralCache.close()
+    ephemeralLock.close()
     idGenerator.close()
     sequenceNodes.close()
 
@@ -359,7 +378,13 @@ class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, connection
     currentSessionId = idGenerator.incrementAndGet()
     logger.debug( s"New Atomix session ID: $sessionId" )
     if ( ! admin ) {
-      cleanUpEphemeralData()
+      ephemeralLock.lock()
+      try {
+        cleanUpEphemeralData()
+      }
+      finally {
+        ephemeralLock.unlock()
+      }
     }
   }
 

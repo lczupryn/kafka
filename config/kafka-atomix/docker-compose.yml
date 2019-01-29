@@ -16,13 +16,29 @@
 version: '2'
 
 services:
+  kafka0:
+    image: 'kafka-atomix:latest'
+    container_name: 'kafka0'
+    hostname: 'kafka0'
+    domainname: ''
+    ports:
+      - '9092:9092'
+      - '5000/tcp'
+      - '5000/udp'
+    volumes:
+      - kafka0:/volume/kafka/data
+      - ./broker0:/volume/kafka/config
+    entrypoint: [ "/bin/sh", "-c", "/opt/kafka/bin/kafka-server-start.sh /volume/kafka/config/server.properties" ]
+    environment:
+      - KAFKA_HEAP_OPTS=-Xmx2G -Xms2G
+      - KAFKA_LOG4J_OPTS=-Dlog4j.configuration=file:///volume/kafka/config/log4j.properties -Djava.net.preferIPv4Stack=true
   kafka1:
     image: 'kafka-atomix:latest'
     container_name: 'kafka1'
     hostname: 'kafka1'
     domainname: ''
     ports:
-      - '9092:9092'
+      - '9093:9092'
       - '5001/tcp'
       - '5001/udp'
     volumes:
@@ -38,7 +54,7 @@ services:
     hostname: 'kafka2'
     domainname: ''
     ports:
-      - '9093:9092'
+      - '9094:9092'
       - '5002/tcp'
       - '5002/udp'
     volumes:
@@ -48,27 +64,11 @@ services:
     environment:
       - KAFKA_HEAP_OPTS=-Xmx2G -Xms2G
       - KAFKA_LOG4J_OPTS=-Dlog4j.configuration=file:///volume/kafka/config/log4j.properties -Djava.net.preferIPv4Stack=true
-  kafka3:
-    image: 'kafka-atomix:latest'
-    container_name: 'kafka3'
-    hostname: 'kafka3'
-    domainname: ''
-    ports:
-      - '9094:9092'
-      - '5003/tcp'
-      - '5003/udp'
-    volumes:
-      - kafka3:/volume/kafka/data
-      - ./broker3:/volume/kafka/config
-    entrypoint: [ "/bin/sh", "-c", "/opt/kafka/bin/kafka-server-start.sh /volume/kafka/config/server.properties" ]
-    environment:
-      - KAFKA_HEAP_OPTS=-Xmx2G -Xms2G
-      - KAFKA_LOG4J_OPTS=-Dlog4j.configuration=file:///volume/kafka/config/log4j.properties -Djava.net.preferIPv4Stack=true
 
 volumes:
+  kafka0:
+    driver: local
   kafka1:
     driver: local
   kafka2:
-    driver: local
-  kafka3:
     driver: local

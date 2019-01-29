@@ -30,10 +30,13 @@ Below table present changes to standard Kafka configuration parameters. Implemen
 
 ### Running administrative commands
 
-Scripts present in _bin_ folder accept absolute path to Atomix client configuration file (example _config/kafka-atomix/broker1/atomix-admin.conf_) instead of ZooKeeper ensemble URL.
+Scripts present in _bin_ folder accept absolute path to Atomix client configuration file (example _config/kafka-atomix/broker0/atomix-admin.conf_) instead of ZooKeeper ensemble URL.
 
-    ./bin/kafka-topics.sh --create --zookeeper atomix://./config/kafka-atomix/broker1/atomix-admin.conf --replication-factor 2 --partitions 2 --topic topic1
+    ./bin/kafka-topics.sh --create --zookeeper atomix:///opt/kafka/config/kafka-atomix/broker0/atomix-admin.conf --replication-factor 2 --partitions 2 --topic topic1
 
+Users may view the cluster state persisted in Atomix by leveraging _bin/kafka-cluster.sh_ executable.
+
+    ./bin/kafka-cluster.sh --atomix /opt/kafka/config/kafka-atomix/broker0/atomix-admin.conf --describe --keys /brokers/ids,/controller --include-children
 
 Apache Kafka
 =================
