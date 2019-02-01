@@ -32,6 +32,8 @@ services:
     environment:
       - KAFKA_HEAP_OPTS=-Xmx2G -Xms2G
       - KAFKA_LOG4J_OPTS=-Dlog4j.configuration=file:///volume/kafka/config/log4j.properties -Djava.net.preferIPv4Stack=true
+    cap_add:
+      - NET_ADMIN
   kafka1:
     image: 'kafka-atomix:latest'
     container_name: 'kafka1'
@@ -48,6 +50,8 @@ services:
     environment:
       - KAFKA_HEAP_OPTS=-Xmx2G -Xms2G
       - KAFKA_LOG4J_OPTS=-Dlog4j.configuration=file:///volume/kafka/config/log4j.properties -Djava.net.preferIPv4Stack=true
+    cap_add:
+      - NET_ADMIN
   kafka2:
     image: 'kafka-atomix:latest'
     container_name: 'kafka2'
@@ -64,6 +68,8 @@ services:
     environment:
       - KAFKA_HEAP_OPTS=-Xmx2G -Xms2G
       - KAFKA_LOG4J_OPTS=-Dlog4j.configuration=file:///volume/kafka/config/log4j.properties -Djava.net.preferIPv4Stack=true
+    cap_add:
+      - NET_ADMIN
 
 volumes:
   kafka0:
