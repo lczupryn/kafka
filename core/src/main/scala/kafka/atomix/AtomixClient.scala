@@ -17,6 +17,7 @@
 
 package kafka.atomix
 
+import java.net.ConnectException
 import java.time.Duration
 import java.util.concurrent._
 import java.util.concurrent.locks.ReentrantLock
@@ -243,10 +244,16 @@ class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, connection
           if ( running ) {
             command.reportUnsuccessful( Code.CONNECTIONLOSS )
           }
-        case _: PrimitiveException.Timeout =>
+        case e: PrimitiveException =>
           // Atomix reports operation timeout even if quorum of nodes cannot be reached. Simulate ZooKeeper
           // connectivity issue until quorum can be reached again.
-          command.reportUnsuccessful( if ( quorumAvailable( true ) ) Code.OPERATIONTIMEOUT else Code.CONNECTIONLOSS )
+          if ( e.isInstanceOf[PrimitiveException.Timeout]
+              || ( e.getCause != null && e.getCause.isInstanceOf[ConnectException] ) ) {
+            command.reportUnsuccessful( if ( quorumAvailable( true ) ) Code.OPERATIONTIMEOUT else Code.CONNECTIONLOSS )
+          }
+          else {
+            throw e
+          }
       }
     }
   }
