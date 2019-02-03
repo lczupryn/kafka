@@ -422,11 +422,11 @@ class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, connection
   }
 
   private def quorumAvailable(wait: Boolean): Boolean = {
-    // Take total number of nodes from configuration of system partition.
-    val total = atomix.getPartitionService.getSystemPartitionGroup.getPartitions.asScala.head.members().size()
-    // Assume that Atomix member ID equals to Kafka broker identifier.
-    val reachable = atomix.getMembershipService.getReachableMembers.asScala.count( m => Try( m.id().id().toInt ).isSuccess )
-    val quorumReachable = reachable.doubleValue() > ( total.doubleValue() / 2.0d )
+    // Take members from configuration of system partition.
+    val configured = atomix.getPartitionService.getSystemPartitionGroup.getPartitions.asScala.head.members()
+    // See how many of configured nodes are reachable.
+    val reachable = atomix.getMembershipService.getReachableMembers.asScala.filter( m => configured.contains( m.id() ) )
+    val quorumReachable = reachable.size.doubleValue() > ( configured.size.doubleValue() / 2.0d )
     if ( ! quorumReachable || ! wait ) {
       // Atomix membership service may not be updated with latest state of the cluster, but if we already know that
       // quorum of nodes is not reachable, perform early exit.
