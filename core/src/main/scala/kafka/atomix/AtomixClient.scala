@@ -55,7 +55,7 @@ import scala.util.{Random, Try}
 class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, connectionTimeoutMs: Int, admin: Boolean)
     extends AutoCloseable with KafkaMetastore with Logging with KafkaMetricsGroup {
 
-  @volatile private var atomix: Atomix = _ // Atomix client.
+  private var atomix: Atomix = _ // Atomix client.
   @volatile private var currentSessionId: Long = _ // Current session identifier that fences zombie nodes.
   @volatile private var running: Boolean = _ // Flag indicating that client shall be still running.
   @volatile private var connected: Boolean = _ // Are we still conteccted to quorum of nodes?
@@ -81,10 +81,11 @@ class AtomixClient(time: Time, config: String, sessionTimeoutMs: Int, connection
     override def event(event: ClusterMembershipEvent): Unit = {
       logger.debug( s"Received cluster event: $event" )
 
-      if ( ! quorumAvailable( true ) ) {
-        logger.error( "Quorum of nodes not available" )
-        return
-      }
+//      Acquiring distributed lock will fail if quorum of nodes is not available.
+//      if ( ! quorumAvailable( true ) ) {
+//        logger.error( "Quorum of nodes not available" )
+//        return
+//      }
 
       event.`type`() match {
         case ClusterMembershipEvent.Type.MEMBER_REMOVED =>
